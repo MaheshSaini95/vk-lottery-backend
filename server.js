@@ -124,9 +124,9 @@ async function createGatewayOrder(orderId, amount, mobile, name) {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "Mozilla/5.0 (compatible; VK-Lottery/1.0)",
       },
-      timeout: 45000,
+      timeout: 90000,
       maxRedirects: 5,
-      validateStatus: (status) => status >= 200 && status < 600,
+      validateStatus: (status) => status >= 200 && status < 300,
     });
 
     const data = response.data;
