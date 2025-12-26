@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
+import axios from "axios";
 
 dotenv.config();
 
@@ -104,33 +105,34 @@ async function createGatewayOrder(orderId, amount, mobile, name) {
     formData.append("order_id", orderId);
     formData.append(
       "redirect_url",
-      `${process.env.FRONTEND_SUCCESS_URL}?order_id=${orderId}&status=success`
+      `${process.env.FRONTEND_SUCCESS_URL}/?order_id=${orderId}&status=success`
     );
     formData.append("remark1", name);
     formData.append("remark2", "lottery_ticket");
 
-    console.log("📦 Sending to gateway...");
+    console.log("📦 Sending to gateway with axios...");
+    console.log(
+      "🔗 Redirect URL:",
+      `${process.env.FRONTEND_SUCCESS_URL}/?order_id=${orderId}&status=success`
+    );
 
-    const res = await fetch("https://upifastpe.com/api/create-order", {
+    const response = await axios({
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData.toString(),
+      url: "https://upifastpe.com/api/create-order",
+      data: formData.toString(),
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 (compatible; VK-Lottery/1.0)",
+      },
+      timeout: 45000,
+      maxRedirects: 5,
+      validateStatus: (status) => status >= 200 && status < 600,
     });
 
-    const responseText = await res.text();
-    console.log("📥 Gateway raw response:", responseText);
+    const data = response.data;
+    console.log("📥 Response status:", response.status);
+    console.log("📥 Response data:", JSON.stringify(data, null, 2));
 
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (e) {
-      console.error("❌ Invalid JSON response:", responseText);
-      throw new Error("Invalid gateway response");
-    }
-
-    console.log("📥 Gateway parsed:", JSON.stringify(data, null, 2));
-
-    // Check success
     const isSuccess =
       data.status === "SUCCESS" ||
       data.status === "success" ||
@@ -140,13 +142,9 @@ async function createGatewayOrder(orderId, amount, mobile, name) {
       (data.payment_url && data.payment_url !== "");
 
     if (!isSuccess) {
-      const errorMsg =
-        data?.msg || data?.message || data?.error || "Gateway rejected";
-      console.error("❌ Gateway error:", errorMsg);
-      throw new Error(errorMsg);
+      throw new Error(data?.msg || data?.message || "Gateway rejected order");
     }
 
-    // Extract payment URL
     const paymentUrl =
       data.payment_url ||
       data.link ||
@@ -156,14 +154,27 @@ async function createGatewayOrder(orderId, amount, mobile, name) {
       data.result?.payment_url;
 
     if (!paymentUrl) {
-      console.error("❌ No payment URL found in:", data);
-      throw new Error("No payment URL in response");
+      throw new Error("No payment URL in gateway response");
     }
 
     console.log("✅ Payment URL:", paymentUrl);
     return { ...data, payment_url: paymentUrl };
   } catch (err) {
-    console.error("❌ Gateway function error:", err);
+    console.error("❌ Gateway error:", err.message);
+
+    if (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT") {
+      throw new Error("Payment gateway timeout. Please try again in a moment.");
+    } else if (err.code === "ENOTFOUND") {
+      throw new Error("Payment gateway not reachable. Please contact support.");
+    } else if (err.response) {
+      console.error(
+        "❌ Gateway response error:",
+        err.response.status,
+        err.response.data
+      );
+      throw new Error(`Gateway error: ${err.response.status}`);
+    }
+
     throw err;
   }
 }
